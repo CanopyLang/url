@@ -1,0 +1,222 @@
+module Test.Url exposing (main, tests)
+
+import Basics exposing (..)
+import Maybe exposing (..)
+import Url exposing (..)
+import Url.Builder as Builder
+import Test exposing (..)
+import Expect
+
+
+main : Test
+main =
+    tests
+
+
+tests : Test
+tests =
+    describe "Url Tests"
+        [ percentTests
+        , fromStringTests
+        , toStringTests
+        , builderTests
+        ]
+
+
+
+-- PERCENT ENCODING
+
+
+percentTests : Test
+percentTests =
+    describe "Percent Encoding"
+        [ test "encode simple string" <|
+            \() -> Expect.equal "hello" (percentEncode "hello")
+        , test "encode spaces" <|
+            \() -> Expect.equal "hello%20world" (percentEncode "hello world")
+        , test "encode special chars" <|
+            \() -> Expect.equal "a%26b%3Dc" (percentEncode "a&b=c")
+        , test "encode unicode" <|
+            \() -> Expect.equal "%C3%A9" (percentEncode "\u{00E9}")
+        , test "decode simple" <|
+            \() -> Expect.equal (Just "hello") (percentDecode "hello")
+        , test "decode percent" <|
+            \() -> Expect.equal (Just "hello world") (percentDecode "hello%20world")
+        , test "decode special chars" <|
+            \() -> Expect.equal (Just "a&b=c") (percentDecode "a%26b%3Dc")
+        , test "decode invalid returns Nothing" <|
+            \() -> Expect.equal Nothing (percentDecode "%")
+        , test "decode invalid hex returns Nothing" <|
+            \() -> Expect.equal Nothing (percentDecode "%ZZ")
+        , test "round-trip encode/decode" <|
+            \() ->
+                let
+                    original = "hello world & friends=true"
+                in
+                Expect.equal (Just original) (percentDecode (percentEncode original))
+        ]
+
+
+
+-- FROM STRING
+
+
+fromStringTests : Test
+fromStringTests =
+    describe "Url.fromString"
+        [ test "simple http URL" <|
+            \() ->
+                case fromString "http://example.com/path" of
+                    Just url ->
+                        Expect.all
+                            [ \u -> Expect.equal Http u.protocol
+                            , \u -> Expect.equal "example.com" u.host
+                            , \u -> Expect.equal Nothing u.port_
+                            , \u -> Expect.equal "/path" u.path
+                            , \u -> Expect.equal Nothing u.query
+                            , \u -> Expect.equal Nothing u.fragment
+                            ]
+                            url
+                    Nothing ->
+                        Expect.fail "Expected Just, got Nothing"
+        , test "https URL" <|
+            \() ->
+                case fromString "https://example.com" of
+                    Just url ->
+                        Expect.equal Https url.protocol
+                    Nothing ->
+                        Expect.fail "Expected Just"
+        , test "URL with port" <|
+            \() ->
+                case fromString "http://localhost:8080/api" of
+                    Just url ->
+                        Expect.equal (Just 8080) url.port_
+                    Nothing ->
+                        Expect.fail "Expected Just"
+        , test "URL with query" <|
+            \() ->
+                case fromString "http://example.com/search?q=test&lang=en" of
+                    Just url ->
+                        Expect.equal (Just "q=test&lang=en") url.query
+                    Nothing ->
+                        Expect.fail "Expected Just"
+        , test "URL with fragment" <|
+            \() ->
+                case fromString "http://example.com/page#section" of
+                    Just url ->
+                        Expect.equal (Just "section") url.fragment
+                    Nothing ->
+                        Expect.fail "Expected Just"
+        , test "URL with everything" <|
+            \() ->
+                case fromString "https://example.com:443/path?key=val#frag" of
+                    Just url ->
+                        Expect.all
+                            [ \u -> Expect.equal Https u.protocol
+                            , \u -> Expect.equal "example.com" u.host
+                            , \u -> Expect.equal (Just 443) u.port_
+                            , \u -> Expect.equal "/path" u.path
+                            , \u -> Expect.equal (Just "key=val") u.query
+                            , \u -> Expect.equal (Just "frag") u.fragment
+                            ]
+                            url
+                    Nothing ->
+                        Expect.fail "Expected Just"
+        , test "invalid URL returns Nothing" <|
+            \() -> Expect.equal Nothing (fromString "not-a-url")
+        , test "ftp URL returns Nothing" <|
+            \() -> Expect.equal Nothing (fromString "ftp://example.com")
+        , test "root path" <|
+            \() ->
+                case fromString "http://example.com/" of
+                    Just url ->
+                        Expect.equal "/" url.path
+                    Nothing ->
+                        Expect.fail "Expected Just"
+        ]
+
+
+
+-- TO STRING
+
+
+toStringTests : Test
+toStringTests =
+    describe "Url.toString"
+        [ test "round-trip simple URL" <|
+            \() ->
+                case fromString "http://example.com/path" of
+                    Just url ->
+                        Expect.equal "http://example.com/path" (Url.toString url)
+                    Nothing ->
+                        Expect.fail "Expected Just"
+        , test "round-trip URL with all parts" <|
+            \() ->
+                case fromString "https://example.com:8080/path?q=1#top" of
+                    Just url ->
+                        Expect.equal "https://example.com:8080/path?q=1#top" (Url.toString url)
+                    Nothing ->
+                        Expect.fail "Expected Just"
+        ]
+
+
+
+-- URL BUILDER
+
+
+builderTests : Test
+builderTests =
+    describe "Url.Builder"
+        [ describe "absolute"
+            [ test "simple path" <|
+                \() -> Expect.equal "/api/users" (Builder.absolute ["api", "users"] [])
+            , test "path with query" <|
+                \() ->
+                    Expect.equal "/search?q=canopy"
+                        (Builder.absolute ["search"] [Builder.string "q" "canopy"])
+            , test "empty path" <|
+                \() -> Expect.equal "/" (Builder.absolute [] [])
+            , test "multiple query params" <|
+                \() ->
+                    Expect.equal "/items?page=1&limit=10"
+                        (Builder.absolute ["items"]
+                            [ Builder.int "page" 1
+                            , Builder.int "limit" 10
+                            ]
+                        )
+            ]
+        , describe "relative"
+            [ test "simple relative path" <|
+                \() -> Expect.equal "api/users" (Builder.relative ["api", "users"] [])
+            , test "relative with query" <|
+                \() ->
+                    Expect.equal "search?q=test"
+                        (Builder.relative ["search"] [Builder.string "q" "test"])
+            ]
+        , describe "crossOrigin"
+            [ test "cross-origin URL" <|
+                \() ->
+                    Expect.equal "https://api.example.com/v1/data"
+                        (Builder.crossOrigin "https://api.example.com" ["v1", "data"] [])
+            , test "cross-origin with query" <|
+                \() ->
+                    Expect.equal "https://api.example.com/search?q=test"
+                        (Builder.crossOrigin "https://api.example.com" ["search"]
+                            [Builder.string "q" "test"]
+                        )
+            ]
+        , describe "toQuery"
+            [ test "empty query" <|
+                \() -> Expect.equal "" (Builder.toQuery [])
+            , test "single param" <|
+                \() -> Expect.equal "?a=1" (Builder.toQuery [Builder.string "a" "1"])
+            , test "multiple params" <|
+                \() ->
+                    Expect.equal "?a=1&b=2"
+                        (Builder.toQuery
+                            [ Builder.string "a" "1"
+                            , Builder.string "b" "2"
+                            ]
+                        )
+            ]
+        ]
