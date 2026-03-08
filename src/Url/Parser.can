@@ -268,7 +268,12 @@ oneOf parsers =
 
 oneOfStep : List (Parser a b) -> State a -> List (State b)
 oneOfStep parsers state =
-  List.concatMap (\(Parser parser) -> parser state) parsers
+  List.concatMap (unwrapAndApply state) parsers
+
+
+unwrapAndApply : State a -> Parser a b -> List (State b)
+unwrapAndApply state (Parser parser) =
+  parser state
 
 
 {-| A parser that does not consume any path segments.
