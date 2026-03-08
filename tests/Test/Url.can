@@ -1,9 +1,12 @@
 module Test.Url exposing (main, tests)
 
 import Basics exposing (..)
+import Dict
 import Maybe exposing (..)
 import Url exposing (..)
 import Url.Builder as Builder
+import Url.Parser as Parser exposing ((</>), (<?>))
+import Url.Parser.Query as Query
 import Test exposing (..)
 import Expect
 
@@ -13,6 +16,16 @@ main =
     tests
 
 
+parseUrl : Parser.Parser (a -> a) a -> String -> Maybe a
+parseUrl parser urlString =
+    case Url.fromString urlString of
+        Just url ->
+            Parser.parse parser url
+
+        Nothing ->
+            Nothing
+
+
 tests : Test
 tests =
     describe "Url Tests"
@@ -20,6 +33,9 @@ tests =
         , fromStringTests
         , toStringTests
         , builderTests
+        , parserTests
+        , queryParserTests
+        , builderCustomTests
         ]
 
 
@@ -219,4 +235,648 @@ builderTests =
                             ]
                         )
             ]
+        ]
+
+
+
+-- URL PARSER
+
+
+parserTests : Test
+parserTests =
+    describe "Url.Parser"
+        [ describe "s and int"
+            [ test "parse s \"blog\" </> int extracts blog post ID" <|
+                \() ->
+                    Expect.equal (Just 42)
+                        (parseUrl (Parser.s "blog" </> Parser.int) "https://example.com/blog/42")
+            , test "parse s \"blog\" </> int with trailing slash" <|
+                \() ->
+                    Expect.equal (Just 42)
+                        (parseUrl (Parser.s "blog" </> Parser.int) "https://example.com/blog/42/")
+            , test "parse s \"blog\" </> int fails on non-integer" <|
+                \() ->
+                    Expect.equal Nothing
+                        (parseUrl (Parser.s "blog" </> Parser.int) "https://example.com/blog/wolf")
+            , test "parse s \"blog\" </> int fails on missing segment" <|
+                \() ->
+                    Expect.equal Nothing
+                        (parseUrl (Parser.s "blog" </> Parser.int) "https://example.com/blog/")
+            ]
+        , describe "s and string"
+            [ test "parse s \"user\" </> string extracts username" <|
+                \() ->
+                    Expect.equal (Just "alice")
+                        (parseUrl (Parser.s "user" </> Parser.string) "https://example.com/user/alice")
+            , test "parse s \"user\" </> string with trailing slash" <|
+                \() ->
+                    Expect.equal (Just "bob")
+                        (parseUrl (Parser.s "user" </> Parser.string) "https://example.com/user/bob/")
+            ]
+        , describe "top"
+            [ test "top matches root path" <|
+                \() ->
+                    Expect.equal (Just ())
+                        (parseUrl (Parser.map () Parser.top) "https://example.com/")
+            , test "top matches root without trailing slash" <|
+                \() ->
+                    Expect.equal (Just ())
+                        (parseUrl (Parser.map () Parser.top) "https://example.com")
+            , test "top does not match non-root" <|
+                \() ->
+                    Expect.equal Nothing
+                        (parseUrl (Parser.map () Parser.top) "https://example.com/blog")
+            ]
+        , describe "oneOf"
+            [ test "oneOf matches first parser" <|
+                \() ->
+                    Expect.equal (Just "topic:cats")
+                        (parseUrl
+                            (Parser.oneOf
+                                [ Parser.map (\t -> "topic:" ++ t) (Parser.s "topic" </> Parser.string)
+                                , Parser.map (\i -> "blog:" ++ String.fromInt i) (Parser.s "blog" </> Parser.int)
+                                ]
+                            )
+                            "https://example.com/topic/cats"
+                        )
+            , test "oneOf matches second parser" <|
+                \() ->
+                    Expect.equal (Just "blog:99")
+                        (parseUrl
+                            (Parser.oneOf
+                                [ Parser.map (\t -> "topic:" ++ t) (Parser.s "topic" </> Parser.string)
+                                , Parser.map (\i -> "blog:" ++ String.fromInt i) (Parser.s "blog" </> Parser.int)
+                                ]
+                            )
+                            "https://example.com/blog/99"
+                        )
+            , test "oneOf returns Nothing when nothing matches" <|
+                \() ->
+                    Expect.equal Nothing
+                        (parseUrl
+                            (Parser.oneOf
+                                [ Parser.map (\t -> "topic:" ++ t) (Parser.s "topic" </> Parser.string)
+                                , Parser.map (\i -> "blog:" ++ String.fromInt i) (Parser.s "blog" </> Parser.int)
+                                ]
+                            )
+                            "https://example.com/settings"
+                        )
+            ]
+        , describe "fragment"
+            [ test "fragment extracts hash value" <|
+                \() ->
+                    Expect.equal (Just (Just "section1"))
+                        (parseUrl
+                            (Parser.map (\f -> f) (Parser.s "page" </> Parser.fragment identity))
+                            "https://example.com/page#section1"
+                        )
+            , test "fragment returns Nothing when absent" <|
+                \() ->
+                    Expect.equal (Just Nothing)
+                        (parseUrl
+                            (Parser.map (\f -> f) (Parser.s "page" </> Parser.fragment identity))
+                            "https://example.com/page"
+                        )
+            , test "fragment returns Just empty string for bare hash" <|
+                \() ->
+                    Expect.equal (Just (Just ""))
+                        (parseUrl
+                            (Parser.map (\f -> f) (Parser.s "page" </> Parser.fragment identity))
+                            "https://example.com/page#"
+                        )
+            ]
+        , describe "query integration with <?>  "
+            [ test "<?> extracts query parameter" <|
+                \() ->
+                    Expect.equal (Just (Just "cats"))
+                        (parseUrl
+                            (Parser.s "search" <?> Query.string "q")
+                            "https://example.com/search?q=cats"
+                        )
+            , test "<?> returns Nothing for missing param" <|
+                \() ->
+                    Expect.equal (Just Nothing)
+                        (parseUrl
+                            (Parser.s "search" <?> Query.string "q")
+                            "https://example.com/search"
+                        )
+            , test "<?> returns Nothing for missing param with other params" <|
+                \() ->
+                    Expect.equal (Just Nothing)
+                        (parseUrl
+                            (Parser.s "search" <?> Query.string "q")
+                            "https://example.com/search?page=1"
+                        )
+            ]
+        , describe "map"
+            [ test "map transforms parsed value" <|
+                \() ->
+                    Expect.equal (Just 84)
+                        (parseUrl
+                            (Parser.map (\n -> n * 2) (Parser.s "num" </> Parser.int))
+                            "https://example.com/num/42"
+                        )
+            , test "map with multi-segment constructor" <|
+                \() ->
+                    Expect.equal (Just "bob:42")
+                        (parseUrl
+                            (Parser.map (\name id -> name ++ ":" ++ String.fromInt id)
+                                (Parser.s "user" </> Parser.string </> Parser.s "comment" </> Parser.int)
+                            )
+                            "https://example.com/user/bob/comment/42"
+                        )
+            ]
+        , describe "custom"
+            [ test "custom parser that accepts only .css files" <|
+                \() ->
+                    Expect.equal (Just "style.css")
+                        (parseUrl
+                            (Parser.s "assets" </> Parser.custom "CSS_FILE" (\seg ->
+                                if String.endsWith ".css" seg then
+                                    Just seg
+                                else
+                                    Nothing
+                            ))
+                            "https://example.com/assets/style.css"
+                        )
+            , test "custom parser rejects non-matching segment" <|
+                \() ->
+                    Expect.equal Nothing
+                        (parseUrl
+                            (Parser.s "assets" </> Parser.custom "CSS_FILE" (\seg ->
+                                if String.endsWith ".css" seg then
+                                    Just seg
+                                else
+                                    Nothing
+                            ))
+                            "https://example.com/assets/style.js"
+                        )
+            , test "custom parser with transformation" <|
+                \() ->
+                    Expect.equal (Just 42)
+                        (parseUrl
+                            (Parser.s "hex" </> Parser.custom "HEX" (\seg ->
+                                if String.startsWith "0x" seg then
+                                    String.toInt (String.dropLeft 2 seg)
+                                else
+                                    Nothing
+                            ))
+                            "https://example.com/hex/0x42"
+                        )
+            , test "custom parser fails on empty path" <|
+                \() ->
+                    Expect.equal Nothing
+                        (parseUrl
+                            (Parser.custom "ANY" Just)
+                            "https://example.com/"
+                        )
+            ]
+        , describe "query function"
+            [ test "query used directly with </> extracts param" <|
+                \() ->
+                    Expect.equal (Just (Just "cats"))
+                        (parseUrl
+                            (Parser.s "search" </> Parser.query (Query.string "q"))
+                            "https://example.com/search?q=cats"
+                        )
+            , test "query used directly returns Nothing for missing param" <|
+                \() ->
+                    Expect.equal (Just Nothing)
+                        (parseUrl
+                            (Parser.s "search" </> Parser.query (Query.string "q"))
+                            "https://example.com/search"
+                        )
+            , test "query with int parser" <|
+                \() ->
+                    Expect.equal (Just (Just 5))
+                        (parseUrl
+                            (Parser.s "items" </> Parser.query (Query.int "page"))
+                            "https://example.com/items?page=5"
+                        )
+            , test "query with map2 combines two params" <|
+                \() ->
+                    Expect.equal (Just (Just "cats-2"))
+                        (parseUrl
+                            (Parser.s "search" </> Parser.query
+                                (Query.map2
+                                    (\q p ->
+                                        case q of
+                                            Just qVal ->
+                                                case p of
+                                                    Just pVal ->
+                                                        Just (qVal ++ "-" ++ String.fromInt pVal)
+
+                                                    Nothing ->
+                                                        Nothing
+
+                                            Nothing ->
+                                                Nothing
+                                    )
+                                    (Query.string "q")
+                                    (Query.int "page")
+                                )
+                            )
+                            "https://example.com/search?q=cats&page=2"
+                        )
+            ]
+        , describe "edge cases"
+            [ test "empty path segments are handled" <|
+                \() ->
+                    Expect.equal (Just ())
+                        (parseUrl (Parser.map () Parser.top) "https://example.com")
+            , test "no match returns Nothing" <|
+                \() ->
+                    Expect.equal Nothing
+                        (parseUrl (Parser.s "blog" </> Parser.int) "https://example.com/shop/42")
+            , test "extra path segments cause no match" <|
+                \() ->
+                    Expect.equal Nothing
+                        (parseUrl (Parser.map () (Parser.s "blog" </> Parser.top)) "https://example.com/blog/42/extra")
+            , test "query params do not interfere with path parsing" <|
+                \() ->
+                    Expect.equal (Just 7)
+                        (parseUrl (Parser.s "blog" </> Parser.int) "https://example.com/blog/7?q=wolf")
+            , test "fragment does not interfere with path parsing" <|
+                \() ->
+                    Expect.equal (Just 7)
+                        (parseUrl (Parser.s "blog" </> Parser.int) "https://example.com/blog/7#top")
+            ]
+        ]
+
+
+
+-- URL PARSER QUERY
+
+
+queryParserTests : Test
+queryParserTests =
+    describe "Url.Parser.Query"
+        [ describe "Query.string"
+            [ test "extracts string query param" <|
+                \() ->
+                    Expect.equal (Just (Just "cats"))
+                        (parseUrl
+                            (Parser.s "search" <?> Query.string "q")
+                            "https://example.com/search?q=cats"
+                        )
+            , test "returns Nothing for missing key" <|
+                \() ->
+                    Expect.equal (Just Nothing)
+                        (parseUrl
+                            (Parser.s "search" <?> Query.string "q")
+                            "https://example.com/search?other=val"
+                        )
+            , test "returns Nothing for duplicate keys" <|
+                \() ->
+                    Expect.equal (Just Nothing)
+                        (parseUrl
+                            (Parser.s "search" <?> Query.string "q")
+                            "https://example.com/search?q=cats&q=dogs"
+                        )
+            ]
+        , describe "Query.int"
+            [ test "extracts int query param" <|
+                \() ->
+                    Expect.equal (Just (Just 2))
+                        (parseUrl
+                            (Parser.s "items" <?> Query.int "page")
+                            "https://example.com/items?page=2"
+                        )
+            , test "returns Nothing for non-integer value" <|
+                \() ->
+                    Expect.equal (Just Nothing)
+                        (parseUrl
+                            (Parser.s "items" <?> Query.int "page")
+                            "https://example.com/items?page=abc"
+                        )
+            , test "returns Nothing for missing key" <|
+                \() ->
+                    Expect.equal (Just Nothing)
+                        (parseUrl
+                            (Parser.s "items" <?> Query.int "page")
+                            "https://example.com/items"
+                        )
+            ]
+        , describe "Query.enum"
+            [ test "extracts enum query param" <|
+                \() ->
+                    Expect.equal (Just (Just "asc"))
+                        (parseUrl
+                            (Parser.s "items" <?> Query.enum "sort" (Dict.fromList [ ("ascending", "asc"), ("descending", "desc") ]))
+                            "https://example.com/items?sort=ascending"
+                        )
+            , test "returns Nothing for value not in dict" <|
+                \() ->
+                    Expect.equal (Just Nothing)
+                        (parseUrl
+                            (Parser.s "items" <?> Query.enum "sort" (Dict.fromList [ ("ascending", "asc"), ("descending", "desc") ]))
+                            "https://example.com/items?sort=random"
+                        )
+            , test "returns Nothing for missing key" <|
+                \() ->
+                    Expect.equal (Just Nothing)
+                        (parseUrl
+                            (Parser.s "items" <?> Query.enum "sort" (Dict.fromList [ ("ascending", "asc") ]))
+                            "https://example.com/items"
+                        )
+            ]
+        , describe "Query.custom"
+            [ test "extracts multiple values for same key" <|
+                \() ->
+                    Expect.equal (Just ["red", "blue"])
+                        (parseUrl
+                            (Parser.s "items" <?> Query.custom "tag" identity)
+                            "https://example.com/items?tag=red&tag=blue"
+                        )
+            , test "returns empty list for missing key" <|
+                \() ->
+                    Expect.equal (Just [])
+                        (parseUrl
+                            (Parser.s "items" <?> Query.custom "tag" identity)
+                            "https://example.com/items"
+                        )
+            , test "returns single-element list for one value" <|
+                \() ->
+                    Expect.equal (Just ["red"])
+                        (parseUrl
+                            (Parser.s "items" <?> Query.custom "tag" identity)
+                            "https://example.com/items?tag=red"
+                        )
+            ]
+        , describe "Query.map"
+            [ test "map transforms query result" <|
+                \() ->
+                    Expect.equal (Just 1)
+                        (parseUrl
+                            (Parser.s "items" <?> Query.map (Maybe.withDefault 1) (Query.int "page"))
+                            "https://example.com/items"
+                        )
+            , test "map preserves present value" <|
+                \() ->
+                    Expect.equal (Just 5)
+                        (parseUrl
+                            (Parser.s "items" <?> Query.map (Maybe.withDefault 1) (Query.int "page"))
+                            "https://example.com/items?page=5"
+                        )
+            ]
+        , describe "Query.map2"
+            [ test "map2 combines two query params" <|
+                \() ->
+                    Expect.equal (Just "cats-2")
+                        (parseUrl
+                            (Parser.s "search" <?>
+                                Query.map2
+                                    (\q p -> Maybe.withDefault "" q ++ "-" ++ String.fromInt (Maybe.withDefault 0 p))
+                                    (Query.string "q")
+                                    (Query.int "page")
+                            )
+                            "https://example.com/search?q=cats&page=2"
+                        )
+            , test "map2 with missing params uses defaults" <|
+                \() ->
+                    Expect.equal (Just "-0")
+                        (parseUrl
+                            (Parser.s "search" <?>
+                                Query.map2
+                                    (\q p -> Maybe.withDefault "" q ++ "-" ++ String.fromInt (Maybe.withDefault 0 p))
+                                    (Query.string "q")
+                                    (Query.int "page")
+                            )
+                            "https://example.com/search"
+                        )
+            ]
+        , describe "Query.map3"
+            [ test "map3 combines three query params" <|
+                \() ->
+                    Expect.equal (Just "cats-2-asc")
+                        (parseUrl
+                            (Parser.s "search" <?>
+                                Query.map3
+                                    (\q p s -> Maybe.withDefault "" q ++ "-" ++ String.fromInt (Maybe.withDefault 0 p) ++ "-" ++ Maybe.withDefault "none" s)
+                                    (Query.string "q")
+                                    (Query.int "page")
+                                    (Query.string "sort")
+                            )
+                            "https://example.com/search?q=cats&page=2&sort=asc"
+                        )
+            , test "map3 with partial params" <|
+                \() ->
+                    Expect.equal (Just "cats-0-none")
+                        (parseUrl
+                            (Parser.s "search" <?>
+                                Query.map3
+                                    (\q p s -> Maybe.withDefault "" q ++ "-" ++ String.fromInt (Maybe.withDefault 0 p) ++ "-" ++ Maybe.withDefault "none" s)
+                                    (Query.string "q")
+                                    (Query.int "page")
+                                    (Query.string "sort")
+                            )
+                            "https://example.com/search?q=cats"
+                        )
+            ]
+        , describe "Query.map4"
+            [ test "map4 combines four query params" <|
+                \() ->
+                    Expect.equal (Just "cats-2-asc-10")
+                        (parseUrl
+                            (Parser.s "search" <?>
+                                Query.map4
+                                    (\q p s l ->
+                                        Maybe.withDefault "" q
+                                            ++ "-" ++ String.fromInt (Maybe.withDefault 0 p)
+                                            ++ "-" ++ Maybe.withDefault "none" s
+                                            ++ "-" ++ String.fromInt (Maybe.withDefault 0 l)
+                                    )
+                                    (Query.string "q")
+                                    (Query.int "page")
+                                    (Query.string "sort")
+                                    (Query.int "limit")
+                            )
+                            "https://example.com/search?q=cats&page=2&sort=asc&limit=10"
+                        )
+            ]
+        , describe "Query.map5"
+            [ test "map5 combines five query params" <|
+                \() ->
+                    Expect.equal (Just "a-1-b-2-c")
+                        (parseUrl
+                            (Parser.s "x" <?>
+                                Query.map5
+                                    (\a b c d e ->
+                                        Maybe.withDefault "" a
+                                            ++ "-" ++ String.fromInt (Maybe.withDefault 0 b)
+                                            ++ "-" ++ Maybe.withDefault "" c
+                                            ++ "-" ++ String.fromInt (Maybe.withDefault 0 d)
+                                            ++ "-" ++ Maybe.withDefault "" e
+                                    )
+                                    (Query.string "a")
+                                    (Query.int "b")
+                                    (Query.string "c")
+                                    (Query.int "d")
+                                    (Query.string "e")
+                            )
+                            "https://example.com/x?a=a&b=1&c=b&d=2&e=c"
+                        )
+            ]
+        , describe "Query.map6"
+            [ test "map6 combines six query params" <|
+                \() ->
+                    Expect.equal (Just "a-1-b-2-c-3")
+                        (parseUrl
+                            (Parser.s "x" <?>
+                                Query.map6
+                                    (\a b c d e f ->
+                                        Maybe.withDefault "" a
+                                            ++ "-" ++ String.fromInt (Maybe.withDefault 0 b)
+                                            ++ "-" ++ Maybe.withDefault "" c
+                                            ++ "-" ++ String.fromInt (Maybe.withDefault 0 d)
+                                            ++ "-" ++ Maybe.withDefault "" e
+                                            ++ "-" ++ String.fromInt (Maybe.withDefault 0 f)
+                                    )
+                                    (Query.string "a")
+                                    (Query.int "b")
+                                    (Query.string "c")
+                                    (Query.int "d")
+                                    (Query.string "e")
+                                    (Query.int "f")
+                            )
+                            "https://example.com/x?a=a&b=1&c=b&d=2&e=c&f=3"
+                        )
+            ]
+        , describe "Query.map7"
+            [ test "map7 combines seven query params" <|
+                \() ->
+                    Expect.equal (Just "a-1-b-2-c-3-d")
+                        (parseUrl
+                            (Parser.s "x" <?>
+                                Query.map7
+                                    (\a b c d e f g ->
+                                        Maybe.withDefault "" a
+                                            ++ "-" ++ String.fromInt (Maybe.withDefault 0 b)
+                                            ++ "-" ++ Maybe.withDefault "" c
+                                            ++ "-" ++ String.fromInt (Maybe.withDefault 0 d)
+                                            ++ "-" ++ Maybe.withDefault "" e
+                                            ++ "-" ++ String.fromInt (Maybe.withDefault 0 f)
+                                            ++ "-" ++ Maybe.withDefault "" g
+                                    )
+                                    (Query.string "a")
+                                    (Query.int "b")
+                                    (Query.string "c")
+                                    (Query.int "d")
+                                    (Query.string "e")
+                                    (Query.int "f")
+                                    (Query.string "g")
+                            )
+                            "https://example.com/x?a=a&b=1&c=b&d=2&e=c&f=3&g=d"
+                        )
+            ]
+        , describe "Query.map8"
+            [ test "map8 combines eight query params" <|
+                \() ->
+                    Expect.equal (Just "a-1-b-2-c-3-d-4")
+                        (parseUrl
+                            (Parser.s "x" <?>
+                                Query.map8
+                                    (\a b c d e f g h ->
+                                        Maybe.withDefault "" a
+                                            ++ "-" ++ String.fromInt (Maybe.withDefault 0 b)
+                                            ++ "-" ++ Maybe.withDefault "" c
+                                            ++ "-" ++ String.fromInt (Maybe.withDefault 0 d)
+                                            ++ "-" ++ Maybe.withDefault "" e
+                                            ++ "-" ++ String.fromInt (Maybe.withDefault 0 f)
+                                            ++ "-" ++ Maybe.withDefault "" g
+                                            ++ "-" ++ String.fromInt (Maybe.withDefault 0 h)
+                                    )
+                                    (Query.string "a")
+                                    (Query.int "b")
+                                    (Query.string "c")
+                                    (Query.int "d")
+                                    (Query.string "e")
+                                    (Query.int "f")
+                                    (Query.string "g")
+                                    (Query.int "h")
+                            )
+                            "https://example.com/x?a=a&b=1&c=b&d=2&e=c&f=3&g=d&h=4"
+                        )
+            , test "map8 with all params missing uses defaults" <|
+                \() ->
+                    Expect.equal (Just "-0--0--0--0")
+                        (parseUrl
+                            (Parser.s "x" <?>
+                                Query.map8
+                                    (\a b c d e f g h ->
+                                        Maybe.withDefault "" a
+                                            ++ "-" ++ String.fromInt (Maybe.withDefault 0 b)
+                                            ++ "-" ++ Maybe.withDefault "" c
+                                            ++ "-" ++ String.fromInt (Maybe.withDefault 0 d)
+                                            ++ "-" ++ Maybe.withDefault "" e
+                                            ++ "-" ++ String.fromInt (Maybe.withDefault 0 f)
+                                            ++ "-" ++ Maybe.withDefault "" g
+                                            ++ "-" ++ String.fromInt (Maybe.withDefault 0 h)
+                                    )
+                                    (Query.string "a")
+                                    (Query.int "b")
+                                    (Query.string "c")
+                                    (Query.int "d")
+                                    (Query.string "e")
+                                    (Query.int "f")
+                                    (Query.string "g")
+                                    (Query.int "h")
+                            )
+                            "https://example.com/x"
+                        )
+            ]
+        ]
+
+
+
+-- URL BUILDER CUSTOM
+
+
+builderCustomTests : Test
+builderCustomTests =
+    describe "Url.Builder.custom"
+        [ test "absolute with fragment" <|
+            \() ->
+                Expect.equal "/packages/canopy/core/latest/String#length"
+                    (Builder.custom Builder.Absolute
+                        [ "packages", "canopy", "core", "latest", "String" ]
+                        []
+                        (Just "length")
+                    )
+        , test "relative with query and no fragment" <|
+            \() ->
+                Expect.equal "there?name=ferret"
+                    (Builder.custom Builder.Relative
+                        [ "there" ]
+                        [ Builder.string "name" "ferret" ]
+                        Nothing
+                    )
+        , test "crossOrigin with query and fragment" <|
+            \() ->
+                Expect.equal "https://example.com:8042/over/there?name=ferret#nose"
+                    (Builder.custom (Builder.CrossOrigin "https://example.com:8042")
+                        [ "over", "there" ]
+                        [ Builder.string "name" "ferret" ]
+                        (Just "nose")
+                    )
+        , test "absolute with no path, no query, no fragment" <|
+            \() ->
+                Expect.equal "/"
+                    (Builder.custom Builder.Absolute [] [] Nothing)
+        , test "absolute with fragment only" <|
+            \() ->
+                Expect.equal "/#top"
+                    (Builder.custom Builder.Absolute [] [] (Just "top"))
+        , test "relative empty" <|
+            \() ->
+                Expect.equal ""
+                    (Builder.custom Builder.Relative [] [] Nothing)
+        , test "absolute with query and fragment" <|
+            \() ->
+                Expect.equal "/search?q=test#results"
+                    (Builder.custom Builder.Absolute
+                        [ "search" ]
+                        [ Builder.string "q" "test" ]
+                        (Just "results")
+                    )
         ]
