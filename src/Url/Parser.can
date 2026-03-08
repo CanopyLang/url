@@ -111,17 +111,21 @@ The path segment must be an exact match!
 -}
 s : String -> Parser a a
 s str =
-  Parser <| \{ visited, unvisited, params, frag, value } ->
-    case unvisited of
-      [] ->
+  Parser <| sStep str
+
+
+sStep : String -> State a -> List (State a)
+sStep str { visited, unvisited, params, frag, value } =
+  case unvisited of
+    [] ->
+      []
+
+    next :: rest ->
+      if next == str then
+        [ State (next :: visited) rest params frag value ]
+
+      else
         []
-
-      next :: rest ->
-        if next == str then
-          [ State (next :: visited) rest params frag value ]
-
-        else
-          []
 
 
 {-| Create a custom path segment parser. Here is how it is used to define the
@@ -143,18 +147,22 @@ You can use it to define something like "only CSS files" like this:
 -}
 custom : String -> (String -> Maybe a) -> Parser (a -> b) b
 custom tipe stringToSomething =
-  Parser <| \{ visited, unvisited, params, frag, value } ->
-    case unvisited of
-      [] ->
-        []
+  Parser <| customStep stringToSomething
 
-      next :: rest ->
-        case stringToSomething next of
-          Just nextValue ->
-            [ State (next :: visited) rest params frag (value nextValue) ]
 
-          Nothing ->
-            []
+customStep : (String -> Maybe a) -> State (a -> b) -> List (State b)
+customStep stringToSomething { visited, unvisited, params, frag, value } =
+  case unvisited of
+    [] ->
+      []
+
+    next :: rest ->
+      case stringToSomething next of
+        Just nextValue ->
+          [ State (next :: visited) rest params frag (value nextValue) ]
+
+        Nothing ->
+          []
 
 
 
@@ -183,8 +191,12 @@ custom tipe stringToSomething =
 -}
 slash : Parser a b -> Parser b c -> Parser a c
 slash (Parser parseBefore) (Parser parseAfter) =
-  Parser <| \state ->
-    List.concatMap parseAfter (parseBefore state)
+  Parser <| slashStep parseBefore parseAfter
+
+
+slashStep : (State a -> List (State b)) -> (State b -> List (State c)) -> State a -> List (State c)
+slashStep parseBefore parseAfter state =
+  List.concatMap parseAfter (parseBefore state)
 
 
 {-| Transform a path parser.
@@ -205,9 +217,13 @@ slash (Parser parseBefore) (Parser parseAfter) =
 -}
 map : a -> Parser a b -> Parser (b -> c) c
 map subValue (Parser parseArg) =
-  Parser <| \{ visited, unvisited, params, frag, value } ->
-    List.map (mapState value) <| parseArg <|
-      State visited unvisited params frag subValue
+  Parser <| mapStep subValue parseArg
+
+
+mapStep : a -> (State a -> List (State b)) -> State (b -> c) -> List (State c)
+mapStep subValue parseArg { visited, unvisited, params, frag, value } =
+  List.map (mapState value) <| parseArg <|
+    State visited unvisited params frag subValue
 
 
 mapState : (a -> b) -> State a -> State b
@@ -247,8 +263,12 @@ If there are multiple parsers that could succeed, the first one wins.
 -}
 oneOf : List (Parser a b) -> Parser a b
 oneOf parsers =
-  Parser <| \state ->
-    List.concatMap (\(Parser parser) -> parser state) parsers
+  Parser <| oneOfStep parsers
+
+
+oneOfStep : List (Parser a b) -> State a -> List (State b)
+oneOfStep parsers state =
+  List.concatMap (\(Parser parser) -> parser state) parsers
 
 
 {-| A parser that does not consume any path segments.
@@ -268,7 +288,12 @@ oneOf parsers =
 -}
 top : Parser a a
 top =
-  Parser <| \state -> [state]
+  Parser <| topStep
+
+
+topStep : State a -> List (State a)
+topStep state =
+  [state]
 
 
 
@@ -321,9 +346,13 @@ segments.
 -}
 query : Query.Parser query -> Parser (query -> a) a
 query (Q.Parser queryParser) =
-  Parser <| \{ visited, unvisited, params, frag, value } ->
-    [ State visited unvisited params frag (value (queryParser params))
-    ]
+  Parser <| queryStep queryParser
+
+
+queryStep : (Dict String (List String) -> query) -> State (query -> a) -> List (State a)
+queryStep queryParser { visited, unvisited, params, frag, value } =
+  [ State visited unvisited params frag (value (queryParser params))
+  ]
 
 
 
@@ -350,9 +379,13 @@ be handy for handling links to DOM elements within a page. Pages like this one!
 -}
 fragment : (Maybe String -> fragment) -> Parser (fragment -> a) a
 fragment toFrag =
-  Parser <| \{ visited, unvisited, params, frag, value } ->
-    [ State visited unvisited params frag (value (toFrag frag))
-    ]
+  Parser <| fragmentStep toFrag
+
+
+fragmentStep : (Maybe String -> fragment) -> State (fragment -> a) -> List (State a)
+fragmentStep toFrag { visited, unvisited, params, frag, value } =
+  [ State visited unvisited params frag (value (toFrag frag))
+  ]
 
 
 

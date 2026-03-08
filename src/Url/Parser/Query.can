@@ -61,13 +61,17 @@ parameters for some reason.
 -}
 string : String -> Parser (Maybe String)
 string key =
-  custom key <| \stringList ->
-    case stringList of
-      [str] ->
-        Just str
+  custom key stringListToMaybe
 
-      _ ->
-        Nothing
+
+stringListToMaybe : List String -> Maybe String
+stringListToMaybe stringList =
+  case stringList of
+    [str] ->
+      Just str
+
+    _ ->
+      Nothing
 
 
 {-| Handle `Int` parameters. Maybe you want to show paginated search results:
@@ -87,13 +91,17 @@ or something like that.
 -}
 int : String -> Parser (Maybe Int)
 int key =
-  custom key <| \stringList ->
-    case stringList of
-      [str] ->
-        String.toInt str
+  custom key intListToMaybe
 
-      _ ->
-        Nothing
+
+intListToMaybe : List String -> Maybe Int
+intListToMaybe stringList =
+  case stringList of
+    [str] ->
+      String.toInt str
+
+    _ ->
+      Nothing
 
 
 {-| Handle enumerated parameters. Maybe you want a true-or-false parameter:
@@ -120,13 +128,17 @@ to get a parser of type `Parser Bool` that swallows any errors and defaults to
 -}
 enum : String -> Dict.Dict String a -> Parser (Maybe a)
 enum key dict =
-  custom key <| \stringList ->
-    case stringList of
-      [str] ->
-        Dict.get str dict
+  custom key (enumListToMaybe dict)
 
-      _ ->
-        Nothing
+
+enumListToMaybe : Dict.Dict String a -> List String -> Maybe a
+enumListToMaybe dict stringList =
+  case stringList of
+    [str] ->
+      Dict.get str dict
+
+    _ ->
+      Nothing
 
 
 
@@ -151,8 +163,12 @@ posts on screen at once. You could say:
 -}
 custom : String -> (List String -> a) -> Parser a
 custom key func =
-  Q.Parser <| \dict ->
-    func (Maybe.withDefault [] (Dict.get key dict))
+  Q.Parser <| customStep key func
+
+
+customStep : String -> (List String -> a) -> Dict.Dict String (List String) -> a
+customStep key func dict =
+  func (Maybe.withDefault [] (Dict.get key dict))
 
 
 
@@ -169,7 +185,12 @@ default to `1` if there is any problem?
 -}
 map : (a -> b) -> Parser a -> Parser b
 map func (Q.Parser a) =
-  Q.Parser <| \dict -> func (a dict)
+  Q.Parser <| mapStep func a
+
+
+mapStep : (a -> b) -> (Dict.Dict String (List String) -> a) -> Dict.Dict String (List String) -> b
+mapStep func a dict =
+  func (a dict)
 
 
 {-| Combine two parsers. A query like `?search=hats&page=2` could be parsed
@@ -187,8 +208,11 @@ with something like this:
 -}
 map2 : (a -> b -> result) -> Parser a -> Parser b -> Parser result
 map2 func (Q.Parser a) (Q.Parser b) =
-  Q.Parser <| \dict ->
-    func (a dict) (b dict)
+  Q.Parser <| map2Step func a b
+
+
+map2Step func a b dict =
+  func (a dict) (b dict)
 
 
 {-| Combine three parsers. A query like `?search=hats&page=2&sort=ascending`
@@ -217,38 +241,53 @@ could be parsed with something like this:
 -}
 map3 : (a -> b -> c -> result) -> Parser a -> Parser b -> Parser c -> Parser result
 map3 func (Q.Parser a) (Q.Parser b) (Q.Parser c) =
-  Q.Parser <| \dict ->
-    func (a dict) (b dict) (c dict)
+  Q.Parser <| map3Step func a b c
+
+
+map3Step func a b c dict =
+  func (a dict) (b dict) (c dict)
 
 
 {-|-}
 map4 : (a -> b -> c -> d -> result) -> Parser a -> Parser b -> Parser c -> Parser d -> Parser result
 map4 func (Q.Parser a) (Q.Parser b) (Q.Parser c) (Q.Parser d) =
-  Q.Parser <| \dict ->
-    func (a dict) (b dict) (c dict) (d dict)
+  Q.Parser <| map4Step func a b c d
+
+
+map4Step func a b c d dict =
+  func (a dict) (b dict) (c dict) (d dict)
 
 
 
 {-|-}
 map5 : (a -> b -> c -> d -> e -> result) -> Parser a -> Parser b -> Parser c -> Parser d -> Parser e -> Parser result
 map5 func (Q.Parser a) (Q.Parser b) (Q.Parser c) (Q.Parser d) (Q.Parser e) =
-  Q.Parser <| \dict ->
-    func (a dict) (b dict) (c dict) (d dict) (e dict)
+  Q.Parser <| map5Step func a b c d e
+
+
+map5Step func a b c d e dict =
+  func (a dict) (b dict) (c dict) (d dict) (e dict)
 
 
 {-|-}
 map6 : (a -> b -> c -> d -> e -> f -> result) -> Parser a -> Parser b -> Parser c -> Parser d -> Parser e -> Parser f -> Parser result
 map6 func (Q.Parser a) (Q.Parser b) (Q.Parser c) (Q.Parser d) (Q.Parser e) (Q.Parser f) =
-  Q.Parser <| \dict ->
-    func (a dict) (b dict) (c dict) (d dict) (e dict) (f dict)
+  Q.Parser <| map6Step func a b c d e f
+
+
+map6Step func a b c d e f dict =
+  func (a dict) (b dict) (c dict) (d dict) (e dict) (f dict)
 
 
 
 {-|-}
 map7 : (a -> b -> c -> d -> e -> f -> g -> result) -> Parser a -> Parser b -> Parser c -> Parser d -> Parser e -> Parser f -> Parser g -> Parser result
 map7 func (Q.Parser a) (Q.Parser b) (Q.Parser c) (Q.Parser d) (Q.Parser e) (Q.Parser f) (Q.Parser g) =
-  Q.Parser <| \dict ->
-    func (a dict) (b dict) (c dict) (d dict) (e dict) (f dict) (g dict)
+  Q.Parser <| map7Step func a b c d e f g
+
+
+map7Step func a b c d e f g dict =
+  func (a dict) (b dict) (c dict) (d dict) (e dict) (f dict) (g dict)
 
 
 
@@ -267,5 +306,8 @@ And then you can chain it to do as many of these as you would like:
 -}
 map8 : (a -> b -> c -> d -> e -> f -> g -> h -> result) -> Parser a -> Parser b -> Parser c -> Parser d -> Parser e -> Parser f -> Parser g -> Parser h -> Parser result
 map8 func (Q.Parser a) (Q.Parser b) (Q.Parser c) (Q.Parser d) (Q.Parser e) (Q.Parser f) (Q.Parser g) (Q.Parser h) =
-  Q.Parser <| \dict ->
-    func (a dict) (b dict) (c dict) (d dict) (e dict) (f dict) (g dict) (h dict)
+  Q.Parser <| map8Step func a b c d e f g h
+
+
+map8Step func a b c d e f g h dict =
+  func (a dict) (b dict) (c dict) (d dict) (e dict) (f dict) (g dict) (h dict)
