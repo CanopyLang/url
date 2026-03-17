@@ -1,6 +1,7 @@
 module Url.Builder exposing
   ( absolute, relative, crossOrigin, custom, Root(..)
   , QueryParameter, string, int, toQuery
+  , queryParam, queryParams
   )
 
 
@@ -23,6 +24,9 @@ This module helps you create these!
 # Queries
 @docs QueryParameter, string, int, toQuery
 
+# Simple Query String Helpers
+@docs queryParam, queryParams
+
 -}
 
 
@@ -38,8 +42,8 @@ import Url
     absolute [] []
     -- "/"
 
-    absolute [ "packages", "elm", "core" ] []
-    -- "/packages/elm/core"
+    absolute [ "packages", "canopy", "core" ] []
+    -- "/packages/canopy/core"
 
     absolute [ "blog", String.fromInt 42 ] []
     -- "/blog/42"
@@ -59,8 +63,8 @@ absolute pathSegments parameters =
     relative [] []
     -- ""
 
-    relative [ "elm", "core" ] []
-    -- "elm/core"
+    relative [ "canopy", "core" ] []
+    -- "canopy/core"
 
     relative [ "blog", String.fromInt 42 ] []
     -- "blog/42"
@@ -115,10 +119,10 @@ type Root = Absolute | Relative | CrossOrigin String
 {-| Create custom URLs that may have a hash on the end:
 
     custom Absolute
-      [ "packages", "elm", "core", "latest", "String" ]
+      [ "packages", "canopy", "core", "latest", "String" ]
       []
       (Just "length")
-    -- "/packages/elm/core/latest/String#length"
+    -- "/packages/canopy/core/latest/String#length"
 
     custom Relative [ "there" ] [ string "name" "ferret" ] Nothing
     -- "there?name=ferret"
@@ -222,3 +226,49 @@ toQuery parameters =
 toQueryPair : QueryParameter -> String
 toQueryPair (QueryParameter key value) =
   key ++ "=" ++ value
+
+
+
+-- SIMPLE QUERY STRING HELPERS
+
+
+{-| Create a single percent-encoded `key=value` query pair as a `String`.
+This is a convenience for when you need a raw query string rather than the
+structured [`QueryParameter`](#QueryParameter) type.
+
+    queryParam "search" "hat"
+    -- "search=hat"
+
+    queryParam "search" "coffee table"
+    -- "search=coffee%20table"
+
+Both the key and value are percent-encoded automatically.
+-}
+queryParam : String -> String -> String
+queryParam key value =
+  Url.percentEncode key ++ "=" ++ Url.percentEncode value
+
+
+{-| Build a query string from a list of key-value pairs. Each key and value
+is percent-encoded automatically, and pairs are joined with `&`.
+
+    queryParams [ ("search", "hat"), ("page", "2") ]
+    -- "search=hat&page=2"
+
+    queryParams [ ("q", "hello world") ]
+    -- "q=hello%20world"
+
+    queryParams []
+    -- ""
+
+This does **not** include the leading `?`. If you need the full query string
+with the `?` prefix, use [`toQuery`](#toQuery) with [`string`](#string) instead.
+-}
+queryParams : List (String, String) -> String
+queryParams pairs =
+  String.join "&" (List.map queryParamFromPair pairs)
+
+
+queryParamFromPair : (String, String) -> String
+queryParamFromPair (key, value) =
+  Url.percentEncode key ++ "=" ++ Url.percentEncode value

@@ -5,6 +5,14 @@ module Url exposing
   , fromString
   , percentEncode
   , percentDecode
+  , withPath
+  , withQuery
+  , withFragment
+  , withHost
+  , withPort
+  , getQueryParam
+  , setQueryParam
+  , removeQueryParam
   )
 
 
@@ -15,6 +23,12 @@ module Url exposing
 
 # Percent-Encoding
 @docs percentEncode, percentDecode
+
+# URL Mutation
+@docs withPath, withQuery, withFragment, withHost, withPort
+
+# Query Parameter Helpers
+@docs getQueryParam, setQueryParam, removeQueryParam
 
 -}
 
@@ -288,3 +302,225 @@ This is the same behavior as JavaScript's [`decodeURIComponent`][js] function.
 percentDecode : String -> Maybe String
 percentDecode =
   UrlFFI.percentDecode
+
+
+
+-- URL MUTATION
+
+
+{-| Set the path of a URL.
+
+    url |> withPath "/new/path"
+-}
+withPath : String -> Url -> Url
+withPath path url =
+  { url | path = path }
+
+
+{-| Set the query string of a URL. Pass `Nothing` to remove the query entirely.
+
+    url |> withQuery (Just "key=value")
+    url |> withQuery Nothing
+-}
+withQuery : Maybe String -> Url -> Url
+withQuery query url =
+  { url | query = query }
+
+
+{-| Set the fragment of a URL. Pass `Nothing` to remove the fragment entirely.
+
+    url |> withFragment (Just "section")
+    url |> withFragment Nothing
+-}
+withFragment : Maybe String -> Url -> Url
+withFragment fragment url =
+  { url | fragment = fragment }
+
+
+{-| Set the host of a URL.
+
+    url |> withHost "example.org"
+-}
+withHost : String -> Url -> Url
+withHost host url =
+  { url | host = host }
+
+
+{-| Set the port of a URL. Pass `Nothing` to remove the port.
+
+    url |> withPort (Just 8080)
+    url |> withPort Nothing
+-}
+withPort : Maybe Int -> Url -> Url
+withPort port_ url =
+  { url | port_ = port_ }
+
+
+
+-- QUERY PARAMETER HELPERS
+
+
+{-| Get the value of a query parameter by key. If the query string contains
+multiple values for the same key, the first one is returned. The key and value
+are percent-decoded before comparison and on return.
+
+    -- Given url with query "name=ferret&color=brown"
+    getQueryParam "name" url == Just "ferret"
+    getQueryParam "color" url == Just "brown"
+    getQueryParam "missing" url == Nothing
+
+Returns `Nothing` if the URL has no query string, or the key is not found.
+-}
+getQueryParam : String -> Url -> Maybe String
+getQueryParam key url =
+  case url.query of
+    Nothing ->
+      Nothing
+
+    Just queryString ->
+      findParam key (splitQueryParams queryString)
+
+
+{-| Set a query parameter on a URL. If the key already exists, its value is
+replaced. If it does not exist, the parameter is appended. Keys and values
+are percent-encoded automatically.
+
+    -- Given url with query "name=ferret"
+    setQueryParam "color" "brown" url
+    -- query becomes "name=ferret&color=brown"
+
+    setQueryParam "name" "cat" url
+    -- query becomes "name=cat"
+-}
+setQueryParam : String -> String -> Url -> Url
+setQueryParam key value url =
+  let
+    encodedKey =
+      percentEncode key
+
+    encodedValue =
+      percentEncode value
+
+    newPair =
+      encodedKey ++ "=" ++ encodedValue
+  in
+  case url.query of
+    Nothing ->
+      { url | query = Just newPair }
+
+    Just queryString ->
+      let
+        params =
+          splitQueryParams queryString
+
+        replaced =
+          replaceParam encodedKey encodedValue params
+      in
+      { url | query = Just (joinQueryParams replaced) }
+
+
+{-| Remove all occurrences of a query parameter by key.
+
+    -- Given url with query "name=ferret&color=brown"
+    removeQueryParam "name" url
+    -- query becomes "color=brown"
+
+If removing the parameter leaves the query string empty, the query is set
+to `Nothing`.
+-}
+removeQueryParam : String -> Url -> Url
+removeQueryParam key url =
+  case url.query of
+    Nothing ->
+      url
+
+    Just queryString ->
+      let
+        encodedKey =
+          percentEncode key
+
+        params =
+          splitQueryParams queryString
+
+        filtered =
+          List.filter (\pair -> paramKey pair /= encodedKey) params
+      in
+      case filtered of
+        [] ->
+          { url | query = Nothing }
+
+        _ ->
+          { url | query = Just (joinQueryParams filtered) }
+
+
+
+-- QUERY PARAMETER INTERNALS
+
+
+splitQueryParams : String -> List String
+splitQueryParams queryString =
+  String.split "&" queryString
+
+
+joinQueryParams : List String -> String
+joinQueryParams params =
+  String.join "&" params
+
+
+paramKey : String -> String
+paramKey pair =
+  case String.indexes "=" pair of
+    [] ->
+      pair
+
+    i :: _ ->
+      String.left i pair
+
+
+paramValue : String -> String
+paramValue pair =
+  case String.indexes "=" pair of
+    [] ->
+      ""
+
+    i :: _ ->
+      String.dropLeft (i + 1) pair
+
+
+findParam : String -> List String -> Maybe String
+findParam key params =
+  let
+    encodedKey =
+      percentEncode key
+  in
+  case params of
+    [] ->
+      Nothing
+
+    pair :: rest ->
+      if paramKey pair == encodedKey then
+        percentDecode (paramValue pair)
+      else
+        findParam key rest
+
+
+replaceParam : String -> String -> List String -> List String
+replaceParam encodedKey encodedValue params =
+  let
+    newPair =
+      encodedKey ++ "=" ++ encodedValue
+  in
+  case params of
+    [] ->
+      [ newPair ]
+
+    pair :: rest ->
+      if paramKey pair == encodedKey then
+        newPair :: replaceRemainingParam encodedKey rest
+      else
+        pair :: replaceParam encodedKey encodedValue rest
+
+
+replaceRemainingParam : String -> List String -> List String
+replaceRemainingParam encodedKey params =
+  List.filter (\pair -> paramKey pair /= encodedKey) params

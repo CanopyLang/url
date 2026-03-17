@@ -248,7 +248,9 @@ map3Step func a b c dict =
   func (a dict) (b dict) (c dict)
 
 
-{-|-}
+{-| Combine four parsers. Works like [`map2`](#map2) but for four query
+parameters.
+-}
 map4 : (a -> b -> c -> d -> result) -> Parser a -> Parser b -> Parser c -> Parser d -> Parser result
 map4 func (Q.Parser a) (Q.Parser b) (Q.Parser c) (Q.Parser d) =
   Q.Parser <| map4Step func a b c d
@@ -259,7 +261,9 @@ map4Step func a b c d dict =
 
 
 
-{-|-}
+{-| Combine five parsers. Works like [`map2`](#map2) but for five query
+parameters.
+-}
 map5 : (a -> b -> c -> d -> e -> result) -> Parser a -> Parser b -> Parser c -> Parser d -> Parser e -> Parser result
 map5 func (Q.Parser a) (Q.Parser b) (Q.Parser c) (Q.Parser d) (Q.Parser e) =
   Q.Parser <| map5Step func a b c d e
@@ -269,7 +273,9 @@ map5Step func a b c d e dict =
   func (a dict) (b dict) (c dict) (d dict) (e dict)
 
 
-{-|-}
+{-| Combine six parsers. Works like [`map2`](#map2) but for six query
+parameters.
+-}
 map6 : (a -> b -> c -> d -> e -> f -> result) -> Parser a -> Parser b -> Parser c -> Parser d -> Parser e -> Parser f -> Parser result
 map6 func (Q.Parser a) (Q.Parser b) (Q.Parser c) (Q.Parser d) (Q.Parser e) (Q.Parser f) =
   Q.Parser <| map6Step func a b c d e f
@@ -280,7 +286,9 @@ map6Step func a b c d e f dict =
 
 
 
-{-|-}
+{-| Combine seven parsers. Works like [`map2`](#map2) but for seven query
+parameters.
+-}
 map7 : (a -> b -> c -> d -> e -> f -> g -> result) -> Parser a -> Parser b -> Parser c -> Parser d -> Parser e -> Parser f -> Parser g -> Parser result
 map7 func (Q.Parser a) (Q.Parser b) (Q.Parser c) (Q.Parser d) (Q.Parser e) (Q.Parser f) (Q.Parser g) =
   Q.Parser <| map7Step func a b c d e f g

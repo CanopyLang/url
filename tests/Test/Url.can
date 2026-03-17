@@ -41,6 +41,8 @@ tests =
         , queryParserTests
         , queryParserAdditionalTests
         , builderCustomTests
+        , mutationTests
+        , queryParamHelperTests
         ]
 
 
@@ -1298,4 +1300,303 @@ builderCustomTests =
                         [ Builder.string "q" "test" ]
                         (Just "results")
                     )
+        ]
+
+
+
+-- URL MUTATION HELPERS
+
+
+sampleUrl : Url
+sampleUrl =
+    { protocol = Https
+    , host = "example.com"
+    , port_ = Just 443
+    , path = "/docs"
+    , query = Just "page=1"
+    , fragment = Just "top"
+    }
+
+
+mutationTests : Test
+mutationTests =
+    describe "URL Mutation"
+        [ describe "withPath"
+            [ test "sets the path" <|
+                \() ->
+                    sampleUrl
+                        |> Url.withPath "/new/path"
+                        |> .path
+                        |> Expect.equal "/new/path"
+            , test "sets root path" <|
+                \() ->
+                    sampleUrl
+                        |> Url.withPath "/"
+                        |> .path
+                        |> Expect.equal "/"
+            , test "does not affect other fields" <|
+                \() ->
+                    sampleUrl
+                        |> Url.withPath "/changed"
+                        |> Url.toString
+                        |> Expect.equal "https://example.com:443/changed?page=1#top"
+            ]
+        , describe "withQuery"
+            [ test "sets query string" <|
+                \() ->
+                    sampleUrl
+                        |> Url.withQuery (Just "key=value")
+                        |> .query
+                        |> Expect.equal (Just "key=value")
+            , test "removes query with Nothing" <|
+                \() ->
+                    sampleUrl
+                        |> Url.withQuery Nothing
+                        |> .query
+                        |> Expect.equal Nothing
+            , test "roundtrips through toString" <|
+                \() ->
+                    sampleUrl
+                        |> Url.withQuery (Just "a=1&b=2")
+                        |> Url.toString
+                        |> Expect.equal "https://example.com:443/docs?a=1&b=2#top"
+            ]
+        , describe "withFragment"
+            [ test "sets fragment" <|
+                \() ->
+                    sampleUrl
+                        |> Url.withFragment (Just "section2")
+                        |> .fragment
+                        |> Expect.equal (Just "section2")
+            , test "removes fragment with Nothing" <|
+                \() ->
+                    sampleUrl
+                        |> Url.withFragment Nothing
+                        |> .fragment
+                        |> Expect.equal Nothing
+            , test "roundtrips through toString" <|
+                \() ->
+                    sampleUrl
+                        |> Url.withFragment Nothing
+                        |> Url.toString
+                        |> Expect.equal "https://example.com:443/docs?page=1"
+            ]
+        , describe "withHost"
+            [ test "sets the host" <|
+                \() ->
+                    sampleUrl
+                        |> Url.withHost "other.org"
+                        |> .host
+                        |> Expect.equal "other.org"
+            , test "roundtrips through toString" <|
+                \() ->
+                    sampleUrl
+                        |> Url.withHost "other.org"
+                        |> Url.toString
+                        |> Expect.equal "https://other.org:443/docs?page=1#top"
+            ]
+        , describe "withPort"
+            [ test "sets the port" <|
+                \() ->
+                    sampleUrl
+                        |> Url.withPort (Just 8080)
+                        |> .port_
+                        |> Expect.equal (Just 8080)
+            , test "removes port with Nothing" <|
+                \() ->
+                    sampleUrl
+                        |> Url.withPort Nothing
+                        |> .port_
+                        |> Expect.equal Nothing
+            , test "roundtrips through toString" <|
+                \() ->
+                    sampleUrl
+                        |> Url.withPort (Just 8080)
+                        |> Url.toString
+                        |> Expect.equal "https://example.com:8080/docs?page=1#top"
+            , test "removed port roundtrips through toString" <|
+                \() ->
+                    sampleUrl
+                        |> Url.withPort Nothing
+                        |> Url.toString
+                        |> Expect.equal "https://example.com/docs?page=1#top"
+            ]
+        , describe "chaining"
+            [ test "multiple mutations compose" <|
+                \() ->
+                    sampleUrl
+                        |> Url.withHost "new.io"
+                        |> Url.withPath "/api/v2"
+                        |> Url.withPort (Just 9000)
+                        |> Url.withQuery (Just "token=abc")
+                        |> Url.withFragment (Just "auth")
+                        |> Url.toString
+                        |> Expect.equal "https://new.io:9000/api/v2?token=abc#auth"
+            , test "stripping all optional parts" <|
+                \() ->
+                    sampleUrl
+                        |> Url.withPort Nothing
+                        |> Url.withQuery Nothing
+                        |> Url.withFragment Nothing
+                        |> Url.toString
+                        |> Expect.equal "https://example.com/docs"
+            ]
+        ]
+
+
+
+-- QUERY PARAMETER HELPERS
+
+
+queryParamHelperTests : Test
+queryParamHelperTests =
+    describe "Query Parameter Helpers"
+        [ describe "getQueryParam"
+            [ test "gets existing param" <|
+                \() ->
+                    sampleUrl
+                        |> Url.getQueryParam "page"
+                        |> Expect.equal (Just "1")
+            , test "returns Nothing for missing param" <|
+                \() ->
+                    sampleUrl
+                        |> Url.getQueryParam "missing"
+                        |> Expect.equal Nothing
+            , test "returns Nothing when no query" <|
+                \() ->
+                    { sampleUrl | query = Nothing }
+                        |> Url.getQueryParam "page"
+                        |> Expect.equal Nothing
+            , test "gets first of multiple params with same key" <|
+                \() ->
+                    { sampleUrl | query = Just "a=1&a=2" }
+                        |> Url.getQueryParam "a"
+                        |> Expect.equal (Just "1")
+            , test "decodes percent-encoded values" <|
+                \() ->
+                    { sampleUrl | query = Just "name=hello%20world" }
+                        |> Url.getQueryParam "name"
+                        |> Expect.equal (Just "hello world")
+            , test "handles param with no value" <|
+                \() ->
+                    { sampleUrl | query = Just "flag=" }
+                        |> Url.getQueryParam "flag"
+                        |> Expect.equal (Just "")
+            , test "gets param from multi-param query" <|
+                \() ->
+                    { sampleUrl | query = Just "a=1&b=2&c=3" }
+                        |> Url.getQueryParam "c"
+                        |> Expect.equal (Just "3")
+            ]
+        , describe "setQueryParam"
+            [ test "adds param to empty query" <|
+                \() ->
+                    { sampleUrl | query = Nothing }
+                        |> Url.setQueryParam "key" "value"
+                        |> .query
+                        |> Expect.equal (Just "key=value")
+            , test "adds new param to existing query" <|
+                \() ->
+                    sampleUrl
+                        |> Url.setQueryParam "color" "blue"
+                        |> .query
+                        |> Expect.equal (Just "page=1&color=blue")
+            , test "replaces existing param" <|
+                \() ->
+                    sampleUrl
+                        |> Url.setQueryParam "page" "5"
+                        |> .query
+                        |> Expect.equal (Just "page=5")
+            , test "percent-encodes key and value" <|
+                \() ->
+                    { sampleUrl | query = Nothing }
+                        |> Url.setQueryParam "my key" "my value"
+                        |> .query
+                        |> Expect.equal (Just "my%20key=my%20value")
+            , test "replaces all duplicates of same key" <|
+                \() ->
+                    { sampleUrl | query = Just "a=1&b=2&a=3" }
+                        |> Url.setQueryParam "a" "99"
+                        |> .query
+                        |> Expect.equal (Just "a=99&b=2")
+            , test "preserves order of other params" <|
+                \() ->
+                    { sampleUrl | query = Just "x=1&y=2&z=3" }
+                        |> Url.setQueryParam "y" "updated"
+                        |> .query
+                        |> Expect.equal (Just "x=1&y=updated&z=3")
+            , test "set then get roundtrips" <|
+                \() ->
+                    { sampleUrl | query = Nothing }
+                        |> Url.setQueryParam "foo" "bar"
+                        |> Url.getQueryParam "foo"
+                        |> Expect.equal (Just "bar")
+            ]
+        , describe "removeQueryParam"
+            [ test "removes existing param" <|
+                \() ->
+                    { sampleUrl | query = Just "a=1&b=2&c=3" }
+                        |> Url.removeQueryParam "b"
+                        |> .query
+                        |> Expect.equal (Just "a=1&c=3")
+            , test "removes only param sets query to Nothing" <|
+                \() ->
+                    sampleUrl
+                        |> Url.removeQueryParam "page"
+                        |> .query
+                        |> Expect.equal Nothing
+            , test "no-op when query is Nothing" <|
+                \() ->
+                    { sampleUrl | query = Nothing }
+                        |> Url.removeQueryParam "page"
+                        |> .query
+                        |> Expect.equal Nothing
+            , test "no-op when key not found" <|
+                \() ->
+                    sampleUrl
+                        |> Url.removeQueryParam "nonexistent"
+                        |> .query
+                        |> Expect.equal (Just "page=1")
+            , test "removes all duplicates of key" <|
+                \() ->
+                    { sampleUrl | query = Just "a=1&b=2&a=3" }
+                        |> Url.removeQueryParam "a"
+                        |> .query
+                        |> Expect.equal (Just "b=2")
+            , test "remove then get returns Nothing" <|
+                \() ->
+                    sampleUrl
+                        |> Url.setQueryParam "color" "red"
+                        |> Url.removeQueryParam "color"
+                        |> Url.getQueryParam "color"
+                        |> Expect.equal Nothing
+            ]
+        , describe "combined operations"
+            [ test "set multiple params then get" <|
+                \() ->
+                    { sampleUrl | query = Nothing }
+                        |> Url.setQueryParam "a" "1"
+                        |> Url.setQueryParam "b" "2"
+                        |> Url.setQueryParam "c" "3"
+                        |> Url.getQueryParam "b"
+                        |> Expect.equal (Just "2")
+            , test "set, remove, set sequence" <|
+                \() ->
+                    { sampleUrl | query = Nothing }
+                        |> Url.setQueryParam "x" "old"
+                        |> Url.removeQueryParam "x"
+                        |> Url.setQueryParam "x" "new"
+                        |> Url.getQueryParam "x"
+                        |> Expect.equal (Just "new")
+            , test "mutation and query param helpers compose" <|
+                \() ->
+                    sampleUrl
+                        |> Url.withPath "/search"
+                        |> Url.withQuery Nothing
+                        |> Url.setQueryParam "q" "canopy"
+                        |> Url.setQueryParam "page" "1"
+                        |> Url.withFragment (Just "results")
+                        |> Url.toString
+                        |> Expect.equal "https://example.com:443/search?q=canopy&page=1#results"
+            ]
         ]
