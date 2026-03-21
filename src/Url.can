@@ -3,6 +3,7 @@ module Url exposing
   , Protocol(..)
   , toString
   , fromString
+  , resolve
   , percentEncode
   , percentDecode
   , withPath
@@ -23,6 +24,9 @@ module Url exposing
 
 # Percent-Encoding
 @docs percentEncode, percentDecode
+
+# Resolving Relative URLs
+@docs resolve
 
 # URL Mutation
 @docs withPath, withQuery, withFragment, withHost, withPort
@@ -132,6 +136,35 @@ fromString str =
 
   else
     Nothing
+
+
+{-| Resolve a URL reference against a base URL. Returns `Just` the resolved
+URL on success, or `Nothing` if either the base is not a valid absolute URL
+or the reference cannot be resolved.
+
+Uses the [WHATWG URL Standard](https://url.spec.whatwg.org/#constructors)
+resolution algorithm, which correctly handles all relative reference forms:
+
+    base = fromString "https://example.com/a/b/page.html"
+
+    resolve base "./other.html"   == Just { ..., path = "/a/b/other.html" }
+    resolve base "../up.html"     == Just { ..., path = "/a/up.html" }
+    resolve base "/absolute"      == Just { ..., path = "/absolute" }
+    resolve base "https://x.com"  == Just { ..., host = "x.com" }
+
+-}
+resolve : Url -> String -> Maybe Url
+resolve base reference =
+  let
+    baseStr =
+      toString base
+  in
+  case UrlFFI.resolveReference baseStr reference of
+    Nothing ->
+      Nothing
+
+    Just resolved ->
+      fromString resolved
 
 
 chompAfterProtocol : Protocol -> String -> Maybe Url

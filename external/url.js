@@ -37,3 +37,25 @@ function percentDecode(string)
 		return _Maybe_Nothing;
 	}
 }
+
+/**
+ * Resolve a relative URL string against a base URL string using the
+ * Web API URL constructor. Returns Just the resolved absolute URL string
+ * on success, or Nothing if either input is invalid.
+ * @canopy-type String -> String -> Maybe String
+ * @name resolveReference
+ * @param {string} base - The absolute base URL
+ * @param {string} reference - The relative or absolute URL reference
+ * @returns {Object} Just the resolved absolute URL string, or Nothing
+ */
+var resolveReference = F2(function(base, reference)
+{
+	try
+	{
+		return _Maybe_Just(new URL(reference, base).href);
+	}
+	catch (e)
+	{
+		return _Maybe_Nothing;
+	}
+});
